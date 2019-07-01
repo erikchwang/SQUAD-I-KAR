@@ -50,8 +50,9 @@ with tf.Session(
 
     while True:
         early_stopping_trigger_count = sum(
-            index > 0 and item["f1"] <= max(item["f1"] for item in model_progress[:index])
-            for index, item in enumerate(model_progress)
+            model_progress[index]["f1"] <= max(item["f1"] for item in model_progress[:index])
+            for index in range(len(model_progress))
+            if index > 0
         )
 
         if early_stopping_trigger_count > early_stopping_trigger_limit:

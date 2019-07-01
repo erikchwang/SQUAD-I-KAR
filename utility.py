@@ -19,7 +19,7 @@ block_count = 3
 dropout_rate = 0.1
 vector_size = 4096
 position_limit = 510
-hop_count = 3
+synset_relation_hop_count = 3
 exponential_moving_average_decay = 0.9995
 early_stopping_trigger_limit = 4
 weight_decay_annealing_schedule = lambda input: 0.0001 * 0.5 ** input
@@ -110,13 +110,14 @@ def convert_dataset(dataset_buffer, word_vocabulary, require_answer):
         span_candidates = [
             {"bound": [start_index, end_index], "error": abs(text_tokens[start_index].idx - span_offset)}
             for start_index in range(len(text_tokens))
-            if text_tokens[start_index:].text.startswith(span_string)
+            if 0 <= text_tokens[start_index:].text.find(span_string) < len(text_tokens[start_index])
             for end_index in range(start_index, len(text_tokens))
-            if text_tokens[start_index:end_index + 1].text == span_string
+            if span_string not in text_tokens[start_index:end_index].text and
+               span_string in text_tokens[start_index:end_index + 1].text
         ]
 
         if len(span_candidates) > 0:
-            return sorted(iterable=span_candidates, key=lambda input: input["error"])[0]["bound"]
+            return sorted(span_candidates, key=lambda input: input["error"])[0]["bound"]
 
     composite_buffer = []
 
@@ -183,7 +184,7 @@ def enrich_composite(composite_buffer, bert_client):
             current_synsets = direct_synsets
             spread_synsets = current_synsets
 
-            for _ in range(hop_count):
+            for _ in range(synset_relation_hop_count):
                 current_synsets = sorted(
                     set(
                         target
@@ -204,9 +205,10 @@ def enrich_composite(composite_buffer, bert_client):
 
         for subject_index, subject_node in enumerate(subject_nodes):
             for object_index, object_node in enumerate(object_nodes):
-                if subject_node is not object_node:
-                    if len(set(subject_node["spread_synsets"]).intersection(object_node["direct_synsets"])) > 0:
-                        text_graph = numpy.append(arr=text_graph, values=[[subject_index, object_index]], axis=0)
+                if subject_node is not object_node and len(
+                        set(subject_node["spread_synsets"]).intersection(object_node["direct_synsets"])
+                ) > 0:
+                    text_graph = numpy.append(arr=text_graph, values=[[subject_index, object_index]], axis=0)
 
         return text_graph
 

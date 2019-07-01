@@ -46,7 +46,6 @@ elif argument_parser.parse_args().step_index == 1:
     dump_data(train_composite, train_composite_path, "pickle")
 
 elif argument_parser.parse_args().step_index == 2:
-
     develop_composite = convert_dataset(
         load_file(develop_dataset_path, "json"),
         load_file(word_vocabulary_path, "text"),

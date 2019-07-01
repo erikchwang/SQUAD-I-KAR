@@ -71,7 +71,7 @@ with tf.Session(
         model_predict = SESSION.run(fetches=MODEL_PREDICT, feed_dict=feed_dict)
 
         target_solution[feed_record["question_id"]] = spacy_nlp(
-            feed_record["passage_source"]
+            feed_record["passage_string"]
         )[model_predict[0]:model_predict[1] + 1].text
 
 dump_data(target_solution, argument_parser.parse_args().solution_path, "json")
