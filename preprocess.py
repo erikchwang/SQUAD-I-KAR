@@ -10,14 +10,14 @@ if argument_parser.parse_args().step_index == 0:
     word_count = {}
     word_glove = {}
 
-    for record in load_file(train_dataset_path, "json") + load_file(develop_dataset_path, "json"):
-        for _, paragraph in record["context"]:
-            for sentence in paragraph:
-                for token in spacy_nlp(" ".join(sentence.split())):
-                    word_count[token.text] = word_count[token.text] + 1 if token.text in word_count else 1
+    for article in load_file(train_dataset_path, "json")["data"] + load_file(develop_dataset_path, "json")["data"]:
+        for paragraph in article["paragraphs"]:
+            for token in spacy_nlp(" ".join(paragraph["context"].split())):
+                word_count[token.text] = word_count[token.text] + 1 if token.text in word_count else 1
 
-        for token in spacy_nlp(" ".join(record["question"].split())):
-            word_count[token.text] = word_count[token.text] + 1 if token.text in word_count else 1
+            for qa in paragraph["qas"]:
+                for token in spacy_nlp(" ".join(qa["question"].split())):
+                    word_count[token.text] = word_count[token.text] + 1 if token.text in word_count else 1
 
     for path in glob.glob("{}/*".format(glove_archive_path)):
         for record in load_file(path, "text"):
