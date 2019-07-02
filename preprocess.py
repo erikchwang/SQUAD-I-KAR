@@ -37,21 +37,35 @@ if argument_parser.parse_args().step_index == 0:
     dump_data(word_embedding, word_embedding_path, "pickle")
 
 elif argument_parser.parse_args().step_index == 1:
-    train_composite = convert_dataset(
-        load_file(train_dataset_path, "json"),
-        load_file(word_vocabulary_path, "text"),
-        True
+    multiprocessing_pool = multiprocessing.Pool(psutil.cpu_count(False))
+
+    train_composite = multiprocessing_pool.map(
+        func=enrich_composite,
+        iterable=convert_dataset(
+            load_file(train_dataset_path, "json"),
+            load_file(word_vocabulary_path, "text"),
+            True
+        )
     )
 
+    multiprocessing_pool.close()
+    multiprocessing_pool.join()
     dump_data(train_composite, train_composite_path, "pickle")
 
 elif argument_parser.parse_args().step_index == 2:
-    develop_composite = convert_dataset(
-        load_file(develop_dataset_path, "json"),
-        load_file(word_vocabulary_path, "text"),
-        False
+    multiprocessing_pool = multiprocessing.Pool(psutil.cpu_count(False))
+
+    develop_composite = multiprocessing_pool.map(
+        func=enrich_composite,
+        iterable=convert_dataset(
+            load_file(develop_dataset_path, "json"),
+            load_file(word_vocabulary_path, "text"),
+            False
+        )
     )
 
+    multiprocessing_pool.close()
+    multiprocessing_pool.join()
     dump_data(develop_composite, develop_composite_path, "pickle")
 
 else:

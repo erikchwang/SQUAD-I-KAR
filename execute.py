@@ -25,13 +25,19 @@ begin_time = datetime.datetime.now()
 argument_parser = argparse.ArgumentParser()
 argument_parser.add_argument("dataset_path")
 argument_parser.add_argument("solution_path")
+multiprocessing_pool = multiprocessing.Pool(psutil.cpu_count(False))
 
-target_composite = convert_dataset(
-    load_file(argument_parser.parse_args().dataset_path, "json"),
-    load_file(word_vocabulary_path, "text"),
-    False
+target_composite = multiprocessing_pool.map(
+    func=enrich_composite,
+    iterable=convert_dataset(
+        load_file(argument_parser.parse_args().dataset_path, "json"),
+        load_file(word_vocabulary_path, "text"),
+        False
+    )
 )
 
+multiprocessing_pool.close()
+multiprocessing_pool.join()
 target_solution = {}
 SAVER = tf.train.import_meta_graph(model_graph_path)
 PASSAGE_SYMBOLS = tf.get_collection("PASSAGE_SYMBOLS")[0]
@@ -55,7 +61,7 @@ with tf.Session(
     SESSION.run(MODEL_SMOOTH)
 
     for record in target_composite:
-        feed_record = enrich_composite([record], bert_client)[0]
+        feed_record = preload_composite([record], bert_client)[0]
 
         feed_dict = {
             PASSAGE_SYMBOLS: feed_record["passage_symbols"],

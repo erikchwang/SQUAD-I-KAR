@@ -5,7 +5,7 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 os.environ["ZEROMQ_SOCK_TMP_DIR"] = "/tmp"
 warnings.filterwarnings("ignore")
 
-import argparse, datetime, glob, json, nltk, numpy, pickle, random, spacy, subprocess, sys
+import argparse, datetime, glob, json, multiprocessing, nltk, numpy, pickle, psutil, random, spacy, subprocess, sys
 import tensorflow as tf, tensorflow_hub as tfh
 from nltk.corpus import stopwords, wordnet
 from bert_serving import client, server
@@ -171,30 +171,30 @@ def convert_dataset(dataset_buffer, word_vocabulary, require_answer):
     return composite_buffer
 
 
-def enrich_composite(composite_buffer, bert_client):
+def enrich_composite(composite_record):
     def get_text_nodes(text_norms, text_tags):
         text_nodes = []
 
         for norm, tag in zip(text_norms, text_tags):
-            direct_synsets = [] if norm in stop_words or tag not in tag_pos else wordnet.synsets(
-                lemma=norm,
-                pos=tag_pos[tag]
-            )
+            direct_synsets = set()
 
-            current_synsets = direct_synsets
-            spread_synsets = current_synsets
+            if norm not in stop_words and tag in tag_pos:
+                direct_synsets.update(wordnet.synsets(lemma=norm, pos=tag_pos[tag]))
 
-            for _ in range(synset_relation_hop_count):
-                current_synsets = sorted(
-                    set(
+            spread_synsets = direct_synsets.copy()
+
+            if len(spread_synsets) > 0:
+                current_synsets = spread_synsets
+
+                for _ in range(synset_relation_hop_count):
+                    current_synsets = set(
                         target
                         for synset in current_synsets
                         for relation in synset_relations
                         for target in getattr(synset, relation)()
                     )
-                )
 
-                spread_synsets = sorted(set(spread_synsets + current_synsets))
+                    spread_synsets.update(current_synsets)
 
             text_nodes.append({"direct_synsets": direct_synsets, "spread_synsets": spread_synsets})
 
@@ -206,12 +206,24 @@ def enrich_composite(composite_buffer, bert_client):
         for subject_index, subject_node in enumerate(subject_nodes):
             for object_index, object_node in enumerate(object_nodes):
                 if subject_node is not object_node and len(
-                        set(subject_node["spread_synsets"]).intersection(object_node["direct_synsets"])
+                        subject_node["spread_synsets"].intersection(object_node["direct_synsets"])
                 ) > 0:
                     text_graph = numpy.append(arr=text_graph, values=[[subject_index, object_index]], axis=0)
 
         return text_graph
 
+    composite_record = composite_record.copy()
+    passage_nodes = get_text_nodes(composite_record["passage_norms"], composite_record["passage_tags"])
+    question_nodes = get_text_nodes(composite_record["question_norms"], composite_record["question_tags"])
+    passage_graph = get_text_graph(passage_nodes, passage_nodes)
+    question_graph = get_text_graph(question_nodes, passage_nodes)
+    composite_record["passage_graph"] = passage_graph
+    composite_record["question_graph"] = question_graph
+
+    return composite_record
+
+
+def preload_composite(composite_buffer, bert_client):
     composite_buffer = [record.copy() for record in composite_buffer]
 
     if bert_client is not None:
@@ -238,14 +250,6 @@ def enrich_composite(composite_buffer, bert_client):
             question_vectors = [[]] * len(record["question_symbols"])
             record["passage_vectors"] = passage_vectors
             record["question_vectors"] = question_vectors
-
-    for record in composite_buffer:
-        passage_nodes = get_text_nodes(record["passage_norms"], record["passage_tags"])
-        question_nodes = get_text_nodes(record["question_norms"], record["question_tags"])
-        passage_graph = get_text_graph(passage_nodes, passage_nodes)
-        question_graph = get_text_graph(question_nodes, passage_nodes)
-        record["passage_graph"] = passage_graph
-        record["question_graph"] = question_graph
 
     return composite_buffer
 

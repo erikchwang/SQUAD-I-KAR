@@ -68,7 +68,7 @@ with tf.Session(
         develop_solution = {}
 
         for batch in [train_queue[index:index + batch_size] for index in range(0, len(train_queue), batch_size)]:
-            feed_batch = enrich_composite(batch, bert_client)
+            feed_batch = preload_composite(batch, bert_client)
             feed_dict = {WEIGHT_DECAY: weight_decay, LEARNING_RATE: learning_rate}
 
             for index in range(batch_size):
@@ -85,7 +85,7 @@ with tf.Session(
             SESSION.run(fetches=MODEL_UPDATE, feed_dict=feed_dict)
 
         for batch in [develop_queue[index:index + batch_size] for index in range(0, len(develop_queue), batch_size)]:
-            feed_batch = enrich_composite(batch, bert_client)
+            feed_batch = preload_composite(batch, bert_client)
             feed_dict = {}
 
             for index in range(batch_size):
