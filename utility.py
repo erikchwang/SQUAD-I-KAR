@@ -12,18 +12,16 @@ from bert_serving import client, server
 
 gpu_count = 4
 batch_size = 32
-layer_size = 256
-inner_size = 1024
-head_count = 8
-block_count = 3
-dropout_rate = 0.1
+layer_size = 512
+dropout_rate = 0.2
 vector_size = 4096
 position_limit = 510
-synset_relation_hop_count = 3
-exponential_moving_average_decay = 0.9995
-early_stopping_trigger_limit = 4
-weight_decay_annealing_schedule = lambda input: 0.0001 * 0.5 ** input
-learning_rate_annealing_schedule = lambda input: 0.0003 * 0.5 ** input
+wordnet_relation_hop_count = 3
+gradient_clipping_global_norm = 5.0
+answer_span_length_limit = 16
+exponential_moving_average_decay = 0.999
+early_stopping_trigger_limit = 5
+learning_rate_annealing_schedule = lambda input: 0.0005 * 0.5 ** input
 nltk.data.path = [os.path.join(os.path.dirname(os.path.realpath(__file__)), "nltk")]
 glove_archive_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "glove")
 bert_archive_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "bert")
@@ -40,9 +38,9 @@ model_storage_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "
 model_progress_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "model/model_progress")
 spacy_nlp = spacy.load(name="en_core_web_lg", disable=["parser", "ner"])
 elmo_url = "https://tfhub.dev/google/elmo/2"
-stop_words = stopwords.words("english")
+stopwords_words = stopwords.words("english")
 
-tag_pos = {
+wordnet_posmap = {
     "NN": wordnet.NOUN, "NNP": wordnet.NOUN, "NNPS": wordnet.NOUN, "NNS": wordnet.NOUN,
     "VB": wordnet.VERB, "VBD": wordnet.VERB, "VBG": wordnet.VERB,
     "VBN": wordnet.VERB, "VBP": wordnet.VERB, "VBZ": wordnet.VERB,
@@ -50,7 +48,7 @@ tag_pos = {
     "RB": wordnet.ADV, "RBR": wordnet.ADV, "RBS": wordnet.ADV, "RP": wordnet.ADV
 }
 
-synset_relations = [
+wordnet_relations = [
     "hypernyms", "instance_hypernyms",
     "hyponyms", "instance_hyponyms",
     "member_holonyms", "substance_holonyms", "part_holonyms",
@@ -94,10 +92,10 @@ def dump_data(data_buffer, file_path, file_type):
 
 
 def convert_dataset(dataset_buffer, word_vocabulary, require_answer):
-    def get_text_norms(text_tokens):
+    def get_text_normals(text_tokens):
         return [token.norm_ for token in text_tokens]
 
-    def get_text_tags(text_tokens):
+    def get_text_postags(text_tokens):
         return [token.tag_ for token in text_tokens]
 
     def get_text_symbols(text_tokens):
@@ -125,28 +123,28 @@ def convert_dataset(dataset_buffer, word_vocabulary, require_answer):
         for paragraph in article["paragraphs"]:
             passage_string = " ".join(paragraph["context"].split())
             passage_tokens = spacy_nlp(passage_string)[:position_limit]
-            passage_norms = get_text_norms(passage_tokens)
-            passage_tags = get_text_tags(passage_tokens)
+            passage_normals = get_text_normals(passage_tokens)
+            passage_postags = get_text_postags(passage_tokens)
             passage_symbols = get_text_symbols(passage_tokens)
             passage_numbers = get_text_numbers(passage_tokens)
 
             for qa in paragraph["qas"]:
                 question_string = " ".join(qa["question"].split())
                 question_tokens = spacy_nlp(question_string)[:position_limit]
-                question_norms = get_text_norms(question_tokens)
-                question_tags = get_text_tags(question_tokens)
+                question_normals = get_text_normals(question_tokens)
+                question_postags = get_text_postags(question_tokens)
                 question_symbols = get_text_symbols(question_tokens)
                 question_numbers = get_text_numbers(question_tokens)
 
                 composite_record = {
                     "passage_string": passage_string,
-                    "passage_norms": passage_norms,
-                    "passage_tags": passage_tags,
+                    "passage_normals": passage_normals,
+                    "passage_postags": passage_postags,
                     "passage_symbols": passage_symbols,
                     "passage_numbers": passage_numbers,
                     "question_string": question_string,
-                    "question_norms": question_norms,
-                    "question_tags": question_tags,
+                    "question_normals": question_normals,
+                    "question_postags": question_postags,
                     "question_symbols": question_symbols,
                     "question_numbers": question_numbers
                 }
@@ -172,25 +170,25 @@ def convert_dataset(dataset_buffer, word_vocabulary, require_answer):
 
 
 def enrich_composite(composite_record):
-    def get_text_nodes(text_norms, text_tags):
+    def get_text_nodes(text_normals, text_postags):
         text_nodes = []
 
-        for norm, tag in zip(text_norms, text_tags):
+        for normal, postag in zip(text_normals, text_postags):
             direct_synsets = set()
 
-            if norm not in stop_words and tag in tag_pos:
-                direct_synsets.update(wordnet.synsets(lemma=norm, pos=tag_pos[tag]))
+            if normal not in stopwords_words and postag in wordnet_posmap:
+                direct_synsets.update(wordnet.synsets(lemma=normal, pos=wordnet_posmap[postag]))
 
             spread_synsets = direct_synsets.copy()
 
             if len(spread_synsets) > 0:
                 current_synsets = spread_synsets
 
-                for _ in range(synset_relation_hop_count):
+                for _ in range(wordnet_relation_hop_count):
                     current_synsets = set(
                         target
                         for synset in current_synsets
-                        for relation in synset_relations
+                        for relation in wordnet_relations
                         for target in getattr(synset, relation)()
                     )
 
@@ -213,8 +211,8 @@ def enrich_composite(composite_record):
         return text_graph
 
     composite_record = composite_record.copy()
-    passage_nodes = get_text_nodes(composite_record["passage_norms"], composite_record["passage_tags"])
-    question_nodes = get_text_nodes(composite_record["question_norms"], composite_record["question_tags"])
+    passage_nodes = get_text_nodes(composite_record["passage_normals"], composite_record["passage_postags"])
+    question_nodes = get_text_nodes(composite_record["question_normals"], composite_record["question_postags"])
     passage_graph = get_text_graph(passage_nodes, passage_nodes)
     question_graph = get_text_graph(question_nodes, passage_nodes)
     composite_record["passage_graph"] = passage_graph
@@ -262,121 +260,24 @@ def feed_forward(
         PASSAGE_GRAPH, QUESTION_GRAPH,
         require_update
 ):
-    def get_transformer_outputs(TARGET_INPUTS):
-        TARGET_OUTPUTS = TARGET_INPUTS
-
-        for _ in range(block_count):
-            TARGET_OUTPUTS = tf.contrib.layers.layer_norm(
-                tf.math.add(
-                    x=TARGET_OUTPUTS,
-                    y=tf.layers.dropout(
-                        inputs=tf.layers.dense(
-                            inputs=tf.concat(
-                                values=tf.unstack(
-                                    tf.linalg.matmul(
-                                        a=tf.layers.dropout(
-                                            inputs=tf.nn.softmax(
-                                                tf.math.divide(
-                                                    x=tf.linalg.matmul(
-                                                        a=tf.stack(
-                                                            tf.split(
-                                                                value=tf.layers.dense(
-                                                                    inputs=TARGET_OUTPUTS,
-                                                                    units=TARGET_INPUTS.shape.as_list()[1],
-                                                                    use_bias=False
-                                                                ),
-                                                                num_or_size_splits=head_count,
-                                                                axis=1
-                                                            )
-                                                        ),
-                                                        b=tf.stack(
-                                                            tf.split(
-                                                                value=tf.layers.dense(
-                                                                    inputs=TARGET_OUTPUTS,
-                                                                    units=TARGET_INPUTS.shape.as_list()[1],
-                                                                    use_bias=False
-                                                                ),
-                                                                num_or_size_splits=head_count,
-                                                                axis=1
-                                                            )
-                                                        ),
-                                                        transpose_b=True
-                                                    ),
-                                                    y=(TARGET_INPUTS.shape.as_list()[1] / head_count) ** 0.5
-                                                )
-                                            ),
-                                            rate=dropout_rate,
-                                            training=require_update
-                                        ),
-                                        b=tf.stack(
-                                            tf.split(
-                                                value=tf.layers.dense(
-                                                    inputs=TARGET_OUTPUTS,
-                                                    units=TARGET_INPUTS.shape.as_list()[1],
-                                                    use_bias=False
-                                                ),
-                                                num_or_size_splits=head_count,
-                                                axis=1
-                                            )
-                                        )
-                                    )
-                                ),
-                                axis=1
-                            ),
-                            units=TARGET_INPUTS.shape.as_list()[1],
-                            use_bias=False
-                        ),
-                        rate=dropout_rate,
-                        training=require_update
-                    )
-                )
-            )
-
-            TARGET_OUTPUTS = tf.contrib.layers.layer_norm(
-                tf.math.add(
-                    x=TARGET_OUTPUTS,
-                    y=tf.layers.dropout(
-                        inputs=tf.layers.dense(
-                            inputs=tf.layers.dropout(
-                                inputs=tf.layers.dense(
-                                    inputs=TARGET_OUTPUTS,
-                                    units=inner_size,
-                                    activation=lambda INPUTS: tf.math.multiply(
-                                        x=tf.math.divide(x=INPUTS, y=2.0),
-                                        y=tf.math.add(x=tf.math.erf(tf.math.divide(x=INPUTS, y=2.0 ** 0.5)), y=1.0)
-                                    )
-                                ),
-                                rate=dropout_rate,
-                                training=require_update
-                            ),
-                            units=TARGET_INPUTS.shape.as_list()[1]
-                        ),
-                        rate=dropout_rate,
-                        training=require_update
-                    )
-                )
-            )
-
-        return TARGET_OUTPUTS
-
-    def get_sequence_outputs(TARGET_INPUTS):
-        return tf.layers.dropout(
-            inputs=tf.math.add(
-                x=tf.layers.dense(
-                    inputs=TARGET_INPUTS,
-                    units=layer_size,
-                    activation=lambda INPUTS: tf.math.multiply(
-                        x=tf.math.divide(x=INPUTS, y=2.0),
-                        y=tf.math.add(x=tf.math.erf(tf.math.divide(x=INPUTS, y=2.0 ** 0.5)), y=1.0)
-                    )
-                ),
-                y=tf.gather(
-                    params=tf.get_variable(name="POSITION_EMBEDDING", shape=[position_limit, layer_size]),
-                    indices=tf.range(tf.shape(TARGET_INPUTS)[0])
-                )
+    def get_bilstm_outputs(TARGET_INPUTS):
+        return tf.squeeze(
+            input=tf.concat(
+                values=tf.nn.bidirectional_dynamic_rnn(
+                    cell_fw=tf.nn.rnn_cell.DropoutWrapper(
+                        cell=tf.nn.rnn_cell.LSTMCell(layer_size // 2),
+                        input_keep_prob=1.0 - dropout_rate if require_update else 1.0
+                    ),
+                    cell_bw=tf.nn.rnn_cell.DropoutWrapper(
+                        cell=tf.nn.rnn_cell.LSTMCell(layer_size // 2),
+                        input_keep_prob=1.0 - dropout_rate if require_update else 1.0
+                    ),
+                    inputs=tf.expand_dims(input=TARGET_INPUTS, axis=0),
+                    dtype=tf.float32
+                )[0],
+                axis=2
             ),
-            rate=dropout_rate,
-            training=require_update
+            axis=[0]
         )
 
     def get_elmo_outputs(TARGET_INPUTS):
@@ -466,16 +367,14 @@ def feed_forward(
 
     with tf.variable_scope("CONTEXT"):
         with tf.variable_scope(name_or_scope="CONTEXT", reuse=None):
-            PASSAGE_CONTEXT_CODES = get_transformer_outputs(
-                get_sequence_outputs(
-                    tf.concat(
-                        values=[
-                            get_elmo_outputs(PASSAGE_SYMBOLS),
-                            tf.gather(params=WORD_EMBEDDING, indices=PASSAGE_NUMBERS),
-                            PASSAGE_VECTORS
-                        ],
-                        axis=1
-                    )
+            PASSAGE_CONTEXT_CODES = get_bilstm_outputs(
+                tf.concat(
+                    values=[
+                        get_elmo_outputs(PASSAGE_SYMBOLS),
+                        tf.gather(params=WORD_EMBEDDING, indices=PASSAGE_NUMBERS),
+                        PASSAGE_VECTORS
+                    ],
+                    axis=1
                 )
             )
 
@@ -497,16 +396,14 @@ def feed_forward(
             )
 
         with tf.variable_scope(name_or_scope="CONTEXT", reuse=True):
-            QUESTION_CONTEXT_CODES = get_transformer_outputs(
-                get_sequence_outputs(
-                    tf.concat(
-                        values=[
-                            get_elmo_outputs(QUESTION_SYMBOLS),
-                            tf.gather(params=WORD_EMBEDDING, indices=QUESTION_NUMBERS),
-                            QUESTION_VECTORS
-                        ],
-                        axis=1
-                    )
+            QUESTION_CONTEXT_CODES = get_bilstm_outputs(
+                tf.concat(
+                    values=[
+                        get_elmo_outputs(QUESTION_SYMBOLS),
+                        tf.gather(params=WORD_EMBEDDING, indices=QUESTION_NUMBERS),
+                        QUESTION_VECTORS
+                    ],
+                    axis=1
                 )
             )
 
@@ -545,14 +442,14 @@ def feed_forward(
             )
 
         with tf.variable_scope("PASSAGE"):
-            PASSAGE_MEMORY_CODES = get_transformer_outputs(PASSAGE_MEMORY_CODES)
+            PASSAGE_MEMORY_CODES = get_bilstm_outputs(PASSAGE_MEMORY_CODES)
 
         with tf.variable_scope("QUESTION"):
-            QUESTION_MEMORY_CODES = get_transformer_outputs(QUESTION_MEMORY_CODES)
+            QUESTION_MEMORY_CODES = get_bilstm_outputs(QUESTION_MEMORY_CODES)
 
     with tf.variable_scope("SUMMARY"):
         with tf.variable_scope("PASSAGE"):
-            PASSAGE_SUMMARY_CODES = get_transformer_outputs(
+            PASSAGE_SUMMARY_CODES = get_bilstm_outputs(
                 get_attention_combination(
                     PASSAGE_MEMORY_CODES,
                     tf.sparse.sparse_dense_matmul(
@@ -595,7 +492,7 @@ def build_update(
         PASSAGE_NUMBERS_BATCH, QUESTION_NUMBERS_BATCH,
         PASSAGE_VECTORS_BATCH, QUESTION_VECTORS_BATCH,
         PASSAGE_GRAPH_BATCH, QUESTION_GRAPH_BATCH,
-        ANSWER_SPAN_BATCH, WEIGHT_DECAY, LEARNING_RATE, EMA_MANAGER
+        ANSWER_SPAN_BATCH, LEARNING_RATE, EMA_MANAGER
 ):
     GRADIENTS_BATCH = []
 
@@ -623,19 +520,17 @@ def build_update(
                 )
 
     with tf.device("/cpu:0"):
-        VARIABLES_UPDATE = tf.contrib.opt.AdamWOptimizer(
-            weight_decay=WEIGHT_DECAY,
-            learning_rate=LEARNING_RATE
-        ).apply_gradients(
-            grads_and_vars=zip(
-                [tf.math.reduce_mean(input_tensor=tf.stack(BATCH), axis=0) for BATCH in zip(*GRADIENTS_BATCH)],
+        VARIABLES_UPDATE = tf.train.AdamOptimizer(LEARNING_RATE).apply_gradients(
+            zip(
+                tf.clip_by_global_norm(
+                    t_list=[
+                        tf.math.reduce_mean(input_tensor=tf.stack(BATCH), axis=0)
+                        for BATCH in zip(*GRADIENTS_BATCH)
+                    ],
+                    clip_norm=gradient_clipping_global_norm
+                )[0],
                 tf.trainable_variables()
-            ),
-            decay_var_list=[
-                VARIABLE
-                for VARIABLE in tf.trainable_variables()
-                if all(item not in VARIABLE.name for item in ["bias", "LayerNorm"])
-            ]
+            )
         )
 
         with tf.control_dependencies([VARIABLES_UPDATE]):
@@ -662,8 +557,11 @@ def build_predicts(
                                 b=tf.nn.softmax(TARGET_DISTRIBUTION[1:]),
                                 transpose_a=True
                             ),
-                            num_lower=0,
-                            num_upper=-1
+                            num_lower=tf.dtypes.cast(x=0, dtype=tf.int32),
+                            num_upper=tf.math.subtract(
+                                x=tf.math.minimum(x=tf.shape(TARGET_DISTRIBUTION)[1], y=answer_span_length_limit),
+                                y=1
+                            )
                         ),
                         shape=[-1]
                     )
@@ -713,8 +611,11 @@ def build_predict(
                                 b=tf.nn.softmax(TARGET_DISTRIBUTION[1:]),
                                 transpose_a=True
                             ),
-                            num_lower=0,
-                            num_upper=-1
+                            num_lower=tf.dtypes.cast(x=0, dtype=tf.int32),
+                            num_upper=tf.math.subtract(
+                                x=tf.math.minimum(x=tf.shape(TARGET_DISTRIBUTION)[1], y=answer_span_length_limit),
+                                y=1
+                            )
                         ),
                         shape=[-1]
                     )

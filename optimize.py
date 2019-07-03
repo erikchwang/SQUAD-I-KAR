@@ -34,7 +34,6 @@ QUESTION_NUMBERS_BATCH = tf.get_collection("QUESTION_NUMBERS_BATCH")
 QUESTION_VECTORS_BATCH = tf.get_collection("QUESTION_VECTORS_BATCH")
 QUESTION_GRAPH_BATCH = tf.get_collection("QUESTION_GRAPH_BATCH")
 ANSWER_SPAN_BATCH = tf.get_collection("ANSWER_SPAN_BATCH")
-WEIGHT_DECAY = tf.get_collection("WEIGHT_DECAY")[0]
 LEARNING_RATE = tf.get_collection("LEARNING_RATE")[0]
 MODEL_UPDATE = tf.get_collection("MODEL_UPDATE")[0]
 MODEL_PREDICTS = tf.get_collection("MODEL_PREDICTS")[0]
@@ -59,7 +58,6 @@ with tf.Session(
             break
 
         begin_time = datetime.datetime.now()
-        weight_decay = weight_decay_annealing_schedule(early_stopping_trigger_count)
         learning_rate = learning_rate_annealing_schedule(early_stopping_trigger_count)
         train_queue = random.sample(train_composite, len(train_composite))
         train_queue += random.sample(train_composite, (batch_size - len(train_queue) % batch_size) % batch_size)
@@ -69,7 +67,7 @@ with tf.Session(
 
         for batch in [train_queue[index:index + batch_size] for index in range(0, len(train_queue), batch_size)]:
             feed_batch = preload_composite(batch, bert_client)
-            feed_dict = {WEIGHT_DECAY: weight_decay, LEARNING_RATE: learning_rate}
+            feed_dict = {LEARNING_RATE: learning_rate}
 
             for index in range(batch_size):
                 feed_dict[PASSAGE_SYMBOLS_BATCH[index]] = feed_batch[index]["passage_symbols"]

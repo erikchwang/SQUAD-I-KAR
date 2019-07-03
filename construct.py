@@ -12,7 +12,6 @@ QUESTION_NUMBERS_BATCH = [tf.placeholder(dtype=tf.int32, shape=[None]) for _ in 
 QUESTION_VECTORS_BATCH = [tf.placeholder(dtype=tf.float32, shape=[None, vector_size]) for _ in range(batch_size)]
 QUESTION_GRAPH_BATCH = [tf.placeholder(dtype=tf.int32, shape=[None, None]) for _ in range(batch_size)]
 ANSWER_SPAN_BATCH = [tf.placeholder(dtype=tf.int32, shape=[None]) for _ in range(batch_size)]
-WEIGHT_DECAY = tf.placeholder(dtype=tf.float32, shape=[])
 LEARNING_RATE = tf.placeholder(dtype=tf.float32, shape=[])
 PASSAGE_SYMBOLS = tf.placeholder(dtype=tf.string, shape=[None])
 PASSAGE_NUMBERS = tf.placeholder(dtype=tf.int32, shape=[None])
@@ -30,7 +29,7 @@ MODEL_UPDATE = build_update(
     PASSAGE_NUMBERS_BATCH, QUESTION_NUMBERS_BATCH,
     PASSAGE_VECTORS_BATCH, QUESTION_VECTORS_BATCH,
     PASSAGE_GRAPH_BATCH, QUESTION_GRAPH_BATCH,
-    ANSWER_SPAN_BATCH, WEIGHT_DECAY, LEARNING_RATE, EMA_MANAGER
+    ANSWER_SPAN_BATCH, LEARNING_RATE, EMA_MANAGER
 )
 
 MODEL_PREDICTS = build_predicts(
@@ -67,7 +66,6 @@ for index in range(batch_size):
     tf.add_to_collection(name="QUESTION_GRAPH_BATCH", value=QUESTION_GRAPH_BATCH[index])
     tf.add_to_collection(name="ANSWER_SPAN_BATCH", value=ANSWER_SPAN_BATCH[index])
 
-tf.add_to_collection(name="WEIGHT_DECAY", value=WEIGHT_DECAY)
 tf.add_to_collection(name="LEARNING_RATE", value=LEARNING_RATE)
 tf.add_to_collection(name="PASSAGE_SYMBOLS", value=PASSAGE_SYMBOLS)
 tf.add_to_collection(name="PASSAGE_NUMBERS", value=PASSAGE_NUMBERS)
