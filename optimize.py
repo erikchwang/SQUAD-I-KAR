@@ -28,11 +28,11 @@ SAVER = tf.train.import_meta_graph(model_graph_path)
 PASSAGE_SYMBOLS_BATCH = tf.get_collection("PASSAGE_SYMBOLS_BATCH")
 PASSAGE_NUMBERS_BATCH = tf.get_collection("PASSAGE_NUMBERS_BATCH")
 PASSAGE_VECTORS_BATCH = tf.get_collection("PASSAGE_VECTORS_BATCH")
-PASSAGE_GRAPH_BATCH = tf.get_collection("PASSAGE_GRAPH_BATCH")
+PASSAGE_CONNECTIONS_BATCH = tf.get_collection("PASSAGE_CONNECTIONS_BATCH")
 QUESTION_SYMBOLS_BATCH = tf.get_collection("QUESTION_SYMBOLS_BATCH")
 QUESTION_NUMBERS_BATCH = tf.get_collection("QUESTION_NUMBERS_BATCH")
 QUESTION_VECTORS_BATCH = tf.get_collection("QUESTION_VECTORS_BATCH")
-QUESTION_GRAPH_BATCH = tf.get_collection("QUESTION_GRAPH_BATCH")
+QUESTION_CONNECTIONS_BATCH = tf.get_collection("QUESTION_CONNECTIONS_BATCH")
 ANSWER_SPAN_BATCH = tf.get_collection("ANSWER_SPAN_BATCH")
 LEARNING_RATE = tf.get_collection("LEARNING_RATE")[0]
 MODEL_UPDATE = tf.get_collection("MODEL_UPDATE")[0]
@@ -73,11 +73,11 @@ with tf.Session(
                 feed_dict[PASSAGE_SYMBOLS_BATCH[index]] = feed_batch[index]["passage_symbols"]
                 feed_dict[PASSAGE_NUMBERS_BATCH[index]] = feed_batch[index]["passage_numbers"]
                 feed_dict[PASSAGE_VECTORS_BATCH[index]] = feed_batch[index]["passage_vectors"]
-                feed_dict[PASSAGE_GRAPH_BATCH[index]] = feed_batch[index]["passage_graph"]
+                feed_dict[PASSAGE_CONNECTIONS_BATCH[index]] = feed_batch[index]["passage_connections"]
                 feed_dict[QUESTION_SYMBOLS_BATCH[index]] = feed_batch[index]["question_symbols"]
                 feed_dict[QUESTION_NUMBERS_BATCH[index]] = feed_batch[index]["question_numbers"]
                 feed_dict[QUESTION_VECTORS_BATCH[index]] = feed_batch[index]["question_vectors"]
-                feed_dict[QUESTION_GRAPH_BATCH[index]] = feed_batch[index]["question_graph"]
+                feed_dict[QUESTION_CONNECTIONS_BATCH[index]] = feed_batch[index]["question_connections"]
                 feed_dict[ANSWER_SPAN_BATCH[index]] = feed_batch[index]["answer_span"]
 
             SESSION.run(fetches=MODEL_UPDATE, feed_dict=feed_dict)
@@ -90,11 +90,11 @@ with tf.Session(
                 feed_dict[PASSAGE_SYMBOLS_BATCH[index]] = feed_batch[index]["passage_symbols"]
                 feed_dict[PASSAGE_NUMBERS_BATCH[index]] = feed_batch[index]["passage_numbers"]
                 feed_dict[PASSAGE_VECTORS_BATCH[index]] = feed_batch[index]["passage_vectors"]
-                feed_dict[PASSAGE_GRAPH_BATCH[index]] = feed_batch[index]["passage_graph"]
+                feed_dict[PASSAGE_CONNECTIONS_BATCH[index]] = feed_batch[index]["passage_connections"]
                 feed_dict[QUESTION_SYMBOLS_BATCH[index]] = feed_batch[index]["question_symbols"]
                 feed_dict[QUESTION_NUMBERS_BATCH[index]] = feed_batch[index]["question_numbers"]
                 feed_dict[QUESTION_VECTORS_BATCH[index]] = feed_batch[index]["question_vectors"]
-                feed_dict[QUESTION_GRAPH_BATCH[index]] = feed_batch[index]["question_graph"]
+                feed_dict[QUESTION_CONNECTIONS_BATCH[index]] = feed_batch[index]["question_connections"]
 
             model_predicts = SESSION.run(fetches=MODEL_PREDICTS, feed_dict=feed_dict)
 

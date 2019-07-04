@@ -43,11 +43,11 @@ SAVER = tf.train.import_meta_graph(model_graph_path)
 PASSAGE_SYMBOLS = tf.get_collection("PASSAGE_SYMBOLS")[0]
 PASSAGE_NUMBERS = tf.get_collection("PASSAGE_NUMBERS")[0]
 PASSAGE_VECTORS = tf.get_collection("PASSAGE_VECTORS")[0]
-PASSAGE_GRAPH = tf.get_collection("PASSAGE_GRAPH")[0]
+PASSAGE_CONNECTIONS = tf.get_collection("PASSAGE_CONNECTIONS")[0]
 QUESTION_SYMBOLS = tf.get_collection("QUESTION_SYMBOLS")[0]
 QUESTION_NUMBERS = tf.get_collection("QUESTION_NUMBERS")[0]
 QUESTION_VECTORS = tf.get_collection("QUESTION_VECTORS")[0]
-QUESTION_GRAPH = tf.get_collection("QUESTION_GRAPH")[0]
+QUESTION_CONNECTIONS = tf.get_collection("QUESTION_CONNECTIONS")[0]
 MODEL_PREDICT = tf.get_collection("MODEL_PREDICT")[0]
 MODEL_SMOOTH = tf.get_collection("MODEL_SMOOTH")[0]
 
@@ -67,11 +67,11 @@ with tf.Session(
             PASSAGE_SYMBOLS: feed_record["passage_symbols"],
             PASSAGE_NUMBERS: feed_record["passage_numbers"],
             PASSAGE_VECTORS: feed_record["passage_vectors"],
-            PASSAGE_GRAPH: feed_record["passage_graph"],
+            PASSAGE_CONNECTIONS: feed_record["passage_connections"],
             QUESTION_SYMBOLS: feed_record["question_symbols"],
             QUESTION_NUMBERS: feed_record["question_numbers"],
             QUESTION_VECTORS: feed_record["question_vectors"],
-            QUESTION_GRAPH: feed_record["question_graph"]
+            QUESTION_CONNECTIONS: feed_record["question_connections"]
         }
 
         model_predict = SESSION.run(fetches=MODEL_PREDICT, feed_dict=feed_dict)

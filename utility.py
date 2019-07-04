@@ -198,7 +198,7 @@ def enrich_composite(composite_record):
 
         return text_nodes
 
-    def get_text_graph(subject_nodes, object_nodes):
+    def get_text_connections(subject_nodes, object_nodes):
         text_graph = numpy.empty(shape=[0, 2], dtype=numpy.int)
 
         for subject_index, subject_node in enumerate(subject_nodes):
@@ -213,10 +213,10 @@ def enrich_composite(composite_record):
     composite_record = composite_record.copy()
     passage_nodes = get_text_nodes(composite_record["passage_normals"], composite_record["passage_postags"])
     question_nodes = get_text_nodes(composite_record["question_normals"], composite_record["question_postags"])
-    passage_graph = get_text_graph(passage_nodes, passage_nodes)
-    question_graph = get_text_graph(question_nodes, passage_nodes)
-    composite_record["passage_graph"] = passage_graph
-    composite_record["question_graph"] = question_graph
+    passage_connections = get_text_connections(passage_nodes, passage_nodes)
+    question_connections = get_text_connections(question_nodes, passage_nodes)
+    composite_record["passage_connections"] = passage_connections
+    composite_record["question_connections"] = question_connections
 
     return composite_record
 
@@ -257,7 +257,7 @@ def feed_forward(
         PASSAGE_SYMBOLS, QUESTION_SYMBOLS,
         PASSAGE_NUMBERS, QUESTION_NUMBERS,
         PASSAGE_VECTORS, QUESTION_VECTORS,
-        PASSAGE_GRAPH, QUESTION_GRAPH,
+        PASSAGE_CONNECTIONS, QUESTION_CONNECTIONS,
         require_update
 ):
     def get_bilstm_outputs(TARGET_INPUTS):
@@ -265,11 +265,11 @@ def feed_forward(
             input=tf.concat(
                 values=tf.nn.bidirectional_dynamic_rnn(
                     cell_fw=tf.nn.rnn_cell.DropoutWrapper(
-                        cell=tf.nn.rnn_cell.LSTMCell(layer_size // 2),
+                        cell=tf.nn.rnn_cell.LSTMCell(TARGET_INPUTS.shape.as_list()[1] // 2),
                         input_keep_prob=1.0 - dropout_rate if require_update else 1.0
                     ),
                     cell_bw=tf.nn.rnn_cell.DropoutWrapper(
-                        cell=tf.nn.rnn_cell.LSTMCell(layer_size // 2),
+                        cell=tf.nn.rnn_cell.LSTMCell(TARGET_INPUTS.shape.as_list()[1] // 2),
                         input_keep_prob=1.0 - dropout_rate if require_update else 1.0
                     ),
                     inputs=tf.expand_dims(input=TARGET_INPUTS, axis=0),
@@ -278,6 +278,16 @@ def feed_forward(
                 axis=2
             ),
             axis=[0]
+        )
+
+    def get_ffnn_outputs(TARGET_INPUTS):
+        return tf.layers.dense(
+            inputs=tf.layers.dropout(inputs=TARGET_INPUTS, rate=dropout_rate, training=require_update),
+            units=layer_size,
+            activation=lambda INPUTS: tf.math.multiply(
+                x=tf.math.divide(x=INPUTS, y=2.0),
+                y=tf.math.add(x=tf.math.erf(tf.math.divide(x=INPUTS, y=2.0 ** 0.5)), y=1.0)
+            )
         )
 
     def get_elmo_outputs(TARGET_INPUTS):
@@ -368,13 +378,15 @@ def feed_forward(
     with tf.variable_scope("CONTEXT"):
         with tf.variable_scope(name_or_scope="CONTEXT", reuse=None):
             PASSAGE_CONTEXT_CODES = get_bilstm_outputs(
-                tf.concat(
-                    values=[
-                        get_elmo_outputs(PASSAGE_SYMBOLS),
-                        tf.gather(params=WORD_EMBEDDING, indices=PASSAGE_NUMBERS),
-                        PASSAGE_VECTORS
-                    ],
-                    axis=1
+                get_ffnn_outputs(
+                    tf.concat(
+                        values=[
+                            get_elmo_outputs(PASSAGE_SYMBOLS),
+                            tf.gather(params=WORD_EMBEDDING, indices=PASSAGE_NUMBERS),
+                            PASSAGE_VECTORS
+                        ],
+                        axis=1
+                    )
                 )
             )
 
@@ -383,10 +395,10 @@ def feed_forward(
                 tf.sparse.sparse_dense_matmul(
                     sp_a=tf.sparse.softmax(
                         tf.sparse.SparseTensor(
-                            indices=tf.dtypes.cast(x=PASSAGE_GRAPH, dtype=tf.int64),
+                            indices=tf.dtypes.cast(x=PASSAGE_CONNECTIONS, dtype=tf.int64),
                             values=tf.gather_nd(
                                 params=get_attention_similarity(PASSAGE_CONTEXT_CODES, PASSAGE_CONTEXT_CODES),
-                                indices=PASSAGE_GRAPH
+                                indices=PASSAGE_CONNECTIONS
                             ),
                             dense_shape=[tf.shape(PASSAGE_CONTEXT_CODES)[0], tf.shape(PASSAGE_CONTEXT_CODES)[0]]
                         )
@@ -397,13 +409,15 @@ def feed_forward(
 
         with tf.variable_scope(name_or_scope="CONTEXT", reuse=True):
             QUESTION_CONTEXT_CODES = get_bilstm_outputs(
-                tf.concat(
-                    values=[
-                        get_elmo_outputs(QUESTION_SYMBOLS),
-                        tf.gather(params=WORD_EMBEDDING, indices=QUESTION_NUMBERS),
-                        QUESTION_VECTORS
-                    ],
-                    axis=1
+                get_ffnn_outputs(
+                    tf.concat(
+                        values=[
+                            get_elmo_outputs(QUESTION_SYMBOLS),
+                            tf.gather(params=WORD_EMBEDDING, indices=QUESTION_NUMBERS),
+                            QUESTION_VECTORS
+                        ],
+                        axis=1
+                    )
                 )
             )
 
@@ -412,10 +426,10 @@ def feed_forward(
                 tf.sparse.sparse_dense_matmul(
                     sp_a=tf.sparse.softmax(
                         tf.sparse.SparseTensor(
-                            indices=tf.dtypes.cast(x=QUESTION_GRAPH, dtype=tf.int64),
+                            indices=tf.dtypes.cast(x=QUESTION_CONNECTIONS, dtype=tf.int64),
                             values=tf.gather_nd(
                                 params=get_attention_similarity(QUESTION_CONTEXT_CODES, PASSAGE_CONTEXT_CODES),
-                                indices=QUESTION_GRAPH
+                                indices=QUESTION_CONNECTIONS
                             ),
                             dense_shape=[tf.shape(QUESTION_CONTEXT_CODES)[0], tf.shape(PASSAGE_CONTEXT_CODES)[0]]
                         )
@@ -455,10 +469,10 @@ def feed_forward(
                     tf.sparse.sparse_dense_matmul(
                         sp_a=tf.sparse.softmax(
                             tf.sparse.SparseTensor(
-                                indices=tf.dtypes.cast(x=PASSAGE_GRAPH, dtype=tf.int64),
+                                indices=tf.dtypes.cast(x=PASSAGE_CONNECTIONS, dtype=tf.int64),
                                 values=tf.gather_nd(
                                     params=get_attention_similarity(PASSAGE_MEMORY_CODES, PASSAGE_MEMORY_CODES),
-                                    indices=PASSAGE_GRAPH
+                                    indices=PASSAGE_CONNECTIONS
                                 ),
                                 dense_shape=[tf.shape(PASSAGE_MEMORY_CODES)[0], tf.shape(PASSAGE_MEMORY_CODES)[0]]
                             )
@@ -491,7 +505,7 @@ def build_update(
         PASSAGE_SYMBOLS_BATCH, QUESTION_SYMBOLS_BATCH,
         PASSAGE_NUMBERS_BATCH, QUESTION_NUMBERS_BATCH,
         PASSAGE_VECTORS_BATCH, QUESTION_VECTORS_BATCH,
-        PASSAGE_GRAPH_BATCH, QUESTION_GRAPH_BATCH,
+        PASSAGE_CONNECTIONS_BATCH, QUESTION_CONNECTIONS_BATCH,
         ANSWER_SPAN_BATCH, LEARNING_RATE, EMA_MANAGER
 ):
     GRADIENTS_BATCH = []
@@ -504,7 +518,7 @@ def build_update(
                     PASSAGE_SYMBOLS_BATCH[index], QUESTION_SYMBOLS_BATCH[index],
                     PASSAGE_NUMBERS_BATCH[index], QUESTION_NUMBERS_BATCH[index],
                     PASSAGE_VECTORS_BATCH[index], QUESTION_VECTORS_BATCH[index],
-                    PASSAGE_GRAPH_BATCH[index], QUESTION_GRAPH_BATCH[index],
+                    PASSAGE_CONNECTIONS_BATCH[index], QUESTION_CONNECTIONS_BATCH[index],
                     True
                 )
 
@@ -544,7 +558,7 @@ def build_predicts(
         PASSAGE_SYMBOLS_BATCH, QUESTION_SYMBOLS_BATCH,
         PASSAGE_NUMBERS_BATCH, QUESTION_NUMBERS_BATCH,
         PASSAGE_VECTORS_BATCH, QUESTION_VECTORS_BATCH,
-        PASSAGE_GRAPH_BATCH, QUESTION_GRAPH_BATCH
+        PASSAGE_CONNECTIONS_BATCH, QUESTION_CONNECTIONS_BATCH
 ):
     def get_greedy_sample(TARGET_DISTRIBUTION):
         return tf.unravel_index(
@@ -581,7 +595,7 @@ def build_predicts(
                     PASSAGE_SYMBOLS_BATCH[index], QUESTION_SYMBOLS_BATCH[index],
                     PASSAGE_NUMBERS_BATCH[index], QUESTION_NUMBERS_BATCH[index],
                     PASSAGE_VECTORS_BATCH[index], QUESTION_VECTORS_BATCH[index],
-                    PASSAGE_GRAPH_BATCH[index], QUESTION_GRAPH_BATCH[index],
+                    PASSAGE_CONNECTIONS_BATCH[index], QUESTION_CONNECTIONS_BATCH[index],
                     False
                 )
 
@@ -598,7 +612,7 @@ def build_predict(
         PASSAGE_SYMBOLS, QUESTION_SYMBOLS,
         PASSAGE_NUMBERS, QUESTION_NUMBERS,
         PASSAGE_VECTORS, QUESTION_VECTORS,
-        PASSAGE_GRAPH, QUESTION_GRAPH
+        PASSAGE_CONNECTIONS, QUESTION_CONNECTIONS
 ):
     def get_greedy_sample(TARGET_DISTRIBUTION):
         return tf.unravel_index(
@@ -631,7 +645,7 @@ def build_predict(
             PASSAGE_SYMBOLS, QUESTION_SYMBOLS,
             PASSAGE_NUMBERS, QUESTION_NUMBERS,
             PASSAGE_VECTORS, QUESTION_VECTORS,
-            PASSAGE_GRAPH, QUESTION_GRAPH,
+            PASSAGE_CONNECTIONS, QUESTION_CONNECTIONS,
             False
         )
 
