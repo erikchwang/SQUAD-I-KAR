@@ -439,20 +439,26 @@ def feed_forward(
             )
 
     with tf.variable_scope("MEMORY"):
-        with tf.variable_scope("SIMILARITY"):
-            PASSAGE_QUESTION_SIMILARITY = get_attention_similarity(PASSAGE_CONTEXT_KEYS, QUESTION_CONTEXT_KEYS)
-            QUESTION_PASSAGE_SIMILARITY = tf.transpose(PASSAGE_QUESTION_SIMILARITY)
-
         with tf.variable_scope(name_or_scope="MEMORY", reuse=None):
             PASSAGE_MEMORY_CODES = get_attention_combination(
                 PASSAGE_CONTEXT_CODES,
-                tf.linalg.matmul(a=tf.nn.softmax(PASSAGE_QUESTION_SIMILARITY), b=QUESTION_CONTEXT_CODES)
+                tf.linalg.matmul(
+                    a=tf.nn.softmax(get_attention_similarity(PASSAGE_CONTEXT_KEYS, QUESTION_CONTEXT_KEYS)),
+                    b=QUESTION_CONTEXT_CODES
+                )
             )
 
         with tf.variable_scope(name_or_scope="MEMORY", reuse=True):
             QUESTION_MEMORY_CODES = get_attention_combination(
                 QUESTION_CONTEXT_CODES,
-                tf.linalg.matmul(a=tf.nn.softmax(QUESTION_PASSAGE_SIMILARITY), b=PASSAGE_CONTEXT_CODES)
+                tf.linalg.matmul(
+                    a=tf.nn.softmax(
+                        logits=get_attention_similarity(PASSAGE_CONTEXT_KEYS, QUESTION_CONTEXT_KEYS),
+                        axis=0
+                    ),
+                    b=PASSAGE_CONTEXT_CODES,
+                    transpose_a=True
+                )
             )
 
         with tf.variable_scope("PASSAGE"):
