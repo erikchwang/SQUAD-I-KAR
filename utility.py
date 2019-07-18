@@ -17,10 +17,10 @@ dropout_rate = 0.2
 vector_size = 4096
 position_limit = 510
 wordnet_relation_hop_count = 3
-gradient_clipping_global_norm = 5.0
+gradient_clipping_global_norm = 3.0
 answer_span_length_limit = 16
 exponential_moving_average_decay = 0.999
-early_stopping_trigger_limit = 5
+early_stopping_trigger_limit = 3
 learning_rate_annealing_schedule = lambda input: 0.0005 * 0.5 ** input
 nltk.data.path = [os.path.join(os.path.dirname(os.path.realpath(__file__)), "nltk")]
 glove_archive_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "glove")
@@ -199,16 +199,16 @@ def enrich_composite(composite_record):
         return text_nodes
 
     def get_text_connections(subject_nodes, object_nodes):
-        text_graph = numpy.empty(shape=[0, 2], dtype=numpy.int)
-
-        for subject_index, subject_node in enumerate(subject_nodes):
-            for object_index, object_node in enumerate(object_nodes):
-                if subject_node is not object_node and len(
-                        subject_node["spread_synsets"].intersection(object_node["direct_synsets"])
-                ) > 0:
-                    text_graph = numpy.append(arr=text_graph, values=[[subject_index, object_index]], axis=0)
-
-        return text_graph
+        return numpy.asarray(
+            a=[
+                  [subject_index, object_index]
+                  for subject_index, subject_node in enumerate(subject_nodes)
+                  for object_index, object_node in enumerate(object_nodes)
+                  if subject_node is not object_node and
+                     len(subject_node["spread_synsets"].intersection(object_node["direct_synsets"])) > 0
+              ] or numpy.empty(shape=[0, 2], dtype=numpy.int),
+            dtype=numpy.int
+        )
 
     composite_record = composite_record.copy()
     passage_nodes = get_text_nodes(composite_record["passage_normals"], composite_record["passage_postags"])
@@ -439,26 +439,20 @@ def feed_forward(
             )
 
     with tf.variable_scope("MEMORY"):
+        with tf.variable_scope("SIMILARITY"):
+            PASSAGE_QUESTION_SIMILARITY = get_attention_similarity(PASSAGE_CONTEXT_KEYS, QUESTION_CONTEXT_KEYS)
+            QUESTION_PASSAGE_SIMILARITY = tf.transpose(PASSAGE_QUESTION_SIMILARITY)
+
         with tf.variable_scope(name_or_scope="MEMORY", reuse=None):
             PASSAGE_MEMORY_CODES = get_attention_combination(
                 PASSAGE_CONTEXT_CODES,
-                tf.linalg.matmul(
-                    a=tf.nn.softmax(get_attention_similarity(PASSAGE_CONTEXT_KEYS, QUESTION_CONTEXT_KEYS)),
-                    b=QUESTION_CONTEXT_CODES
-                )
+                tf.linalg.matmul(a=tf.nn.softmax(PASSAGE_QUESTION_SIMILARITY), b=QUESTION_CONTEXT_CODES)
             )
 
         with tf.variable_scope(name_or_scope="MEMORY", reuse=True):
             QUESTION_MEMORY_CODES = get_attention_combination(
                 QUESTION_CONTEXT_CODES,
-                tf.linalg.matmul(
-                    a=tf.nn.softmax(
-                        logits=get_attention_similarity(PASSAGE_CONTEXT_KEYS, QUESTION_CONTEXT_KEYS),
-                        axis=0
-                    ),
-                    b=PASSAGE_CONTEXT_CODES,
-                    transpose_a=True
-                )
+                tf.linalg.matmul(a=tf.nn.softmax(QUESTION_PASSAGE_SIMILARITY), b=PASSAGE_CONTEXT_CODES)
             )
 
         with tf.variable_scope("PASSAGE"):
@@ -468,21 +462,22 @@ def feed_forward(
             QUESTION_MEMORY_CODES = get_bilstm_outputs(QUESTION_MEMORY_CODES)
 
     with tf.variable_scope("SUMMARY"):
+        with tf.variable_scope("SIMILARITY"):
+            PASSAGE_PASSAGE_SIMILARITY = tf.sparse.SparseTensor(
+                indices=tf.dtypes.cast(x=PASSAGE_CONNECTIONS, dtype=tf.int64),
+                values=tf.gather_nd(
+                    params=get_attention_similarity(PASSAGE_MEMORY_CODES, PASSAGE_MEMORY_CODES),
+                    indices=PASSAGE_CONNECTIONS
+                ),
+                dense_shape=[tf.shape(PASSAGE_MEMORY_CODES)[0], tf.shape(PASSAGE_MEMORY_CODES)[0]]
+            )
+
         with tf.variable_scope("PASSAGE"):
             PASSAGE_SUMMARY_CODES = get_bilstm_outputs(
                 get_attention_combination(
                     PASSAGE_MEMORY_CODES,
                     tf.sparse.sparse_dense_matmul(
-                        sp_a=tf.sparse.softmax(
-                            tf.sparse.SparseTensor(
-                                indices=tf.dtypes.cast(x=PASSAGE_CONNECTIONS, dtype=tf.int64),
-                                values=tf.gather_nd(
-                                    params=get_attention_similarity(PASSAGE_MEMORY_CODES, PASSAGE_MEMORY_CODES),
-                                    indices=PASSAGE_CONNECTIONS
-                                ),
-                                dense_shape=[tf.shape(PASSAGE_MEMORY_CODES)[0], tf.shape(PASSAGE_MEMORY_CODES)[0]]
-                            )
-                        ),
+                        sp_a=tf.sparse.softmax(PASSAGE_PASSAGE_SIMILARITY),
                         b=PASSAGE_MEMORY_CODES
                     )
                 )
