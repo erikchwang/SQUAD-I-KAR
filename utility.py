@@ -7,8 +7,8 @@ warnings.filterwarnings("ignore")
 
 import argparse, datetime, glob, json, multiprocessing, nltk, numpy, pickle, psutil, random, spacy, subprocess, sys
 import tensorflow as tf, tensorflow_hub as tfh
-from nltk.corpus import stopwords, wordnet
 from bert_serving import client, server
+from nltk.corpus import stopwords, wordnet
 
 gpu_count = 4
 batch_size = 32
