@@ -7,8 +7,8 @@ warnings.filterwarnings("ignore")
 
 import argparse, datetime, glob, json, multiprocessing, nltk, numpy, pickle, psutil, random, spacy, subprocess, sys
 import tensorflow as tf, tensorflow_hub as tfh
-from bert_serving import client, server
 from nltk.corpus import stopwords, wordnet
+from bert_serving import client, server
 
 gpu_count = 4
 batch_size = 32
@@ -458,35 +458,28 @@ def feed_forward(
         with tf.variable_scope("PASSAGE"):
             PASSAGE_MEMORY_CODES = get_bilstm_outputs(PASSAGE_MEMORY_CODES)
 
-            PASSAGE_MEMORY_KEYS = get_attention_combination(
-                PASSAGE_MEMORY_CODES,
-                tf.sparse.sparse_dense_matmul(
-                    sp_a=tf.sparse.softmax(
-                        tf.sparse.SparseTensor(
-                            indices=tf.dtypes.cast(x=PASSAGE_CONNECTIONS, dtype=tf.int64),
-                            values=tf.gather_nd(
-                                params=get_attention_similarity(PASSAGE_MEMORY_CODES, PASSAGE_MEMORY_CODES),
-                                indices=PASSAGE_CONNECTIONS
-                            ),
-                            dense_shape=[tf.shape(PASSAGE_MEMORY_CODES)[0], tf.shape(PASSAGE_MEMORY_CODES)[0]]
-                        )
-                    ),
-                    b=PASSAGE_MEMORY_CODES
-                )
-            )
-
         with tf.variable_scope("QUESTION"):
             QUESTION_MEMORY_CODES = get_bilstm_outputs(QUESTION_MEMORY_CODES)
 
     with tf.variable_scope("SUMMARY"):
         with tf.variable_scope("SIMILARITY"):
-            PASSAGE_PASSAGE_SIMILARITY = get_attention_similarity(PASSAGE_MEMORY_KEYS, PASSAGE_MEMORY_KEYS)
+            PASSAGE_PASSAGE_SIMILARITY = tf.sparse.SparseTensor(
+                indices=tf.dtypes.cast(x=PASSAGE_CONNECTIONS, dtype=tf.int64),
+                values=tf.gather_nd(
+                    params=get_attention_similarity(PASSAGE_MEMORY_CODES, PASSAGE_MEMORY_CODES),
+                    indices=PASSAGE_CONNECTIONS
+                ),
+                dense_shape=[tf.shape(PASSAGE_MEMORY_CODES)[0], tf.shape(PASSAGE_MEMORY_CODES)[0]]
+            )
 
         with tf.variable_scope("PASSAGE"):
             PASSAGE_SUMMARY_CODES = get_bilstm_outputs(
                 get_attention_combination(
                     PASSAGE_MEMORY_CODES,
-                    tf.linalg.matmul(a=tf.nn.softmax(PASSAGE_PASSAGE_SIMILARITY), b=PASSAGE_MEMORY_CODES)
+                    tf.sparse.sparse_dense_matmul(
+                        sp_a=tf.sparse.softmax(PASSAGE_PASSAGE_SIMILARITY),
+                        b=PASSAGE_MEMORY_CODES
+                    )
                 )
             )
 
