@@ -7,7 +7,7 @@ wget http://nlp.stanford.edu/data/glove.840B.300d.zip -O $ROOT/glove/glove.zip
 unzip -j $ROOT/glove/glove.zip -d $ROOT/glove
 rm $ROOT/glove/glove.zip
 
-wget https://storage.googleapis.com/bert_models/2018_10_18/cased_L-12_H-768_A-12.zip -O $ROOT/bert/bert.zip
+wget https://storage.googleapis.com/bert_models/2019_05_30/wwm_uncased_L-24_H-1024_A-16.zip -O $ROOT/bert/bert.zip
 unzip -j $ROOT/bert/bert.zip -d $ROOT/bert
 rm $ROOT/bert/bert.zip
 

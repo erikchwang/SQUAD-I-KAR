@@ -14,7 +14,7 @@ gpu_count = 4
 batch_size = 32
 layer_size = 512
 dropout_rate = 0.2
-vector_size = 3072
+vector_size = 4096
 position_limit = 510
 wordnet_relation_hop_count = 3
 gradient_clipping_global_norm = 3.0
@@ -228,7 +228,10 @@ def preload_composite(composite_buffer, bert_client):
         bert_inputs = [
             item
             for record in composite_buffer
-            for item in [record["passage_symbols"], record["question_symbols"]]
+            for item in [
+                [symbol.lower() for symbol in record["passage_symbols"]],
+                [symbol.lower() for symbol in record["question_symbols"]]
+            ]
         ]
 
         bert_outputs = [
